@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright (C) 2017 John Koelndorfer
 #
@@ -17,12 +17,6 @@
 # You should have received a copy of the GNU General Public License
 # along with mccdl.  If not, see <http://www.gnu.org/licenses/>.
 
-# Python 3 compatibility
-from __future__ import (
-        absolute_import, division,
-        print_function, unicode_literals
-)
-
 from collections import namedtuple
 from distutils.dir_util import copy_tree
 import errno
@@ -31,13 +25,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from urllib.parse import unquote as urlunquote, urljoin as _urljoin
 import shutil
 import textwrap
 import zipfile
 
 import appdirs
 import requests
-from six.moves.urllib.parse import unquote as urlunquote, urljoin as _urljoin
 
 
 CurseForgeModPackFile = namedtuple("CurseForgeModPackFile", ("project_id", "file_id", "required"))
