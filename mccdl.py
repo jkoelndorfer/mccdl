@@ -77,6 +77,7 @@ class CurseForgeClient:
             self.project(modpack_file.project_id).download_file(
                 modpack_file.file_id, instance.mods_directory
             )
+        self.logger.info("Installing modpack overrides")
         modpack.install_overrides(instance.minecraft_directory)
 
     def project(self, project_id):
@@ -98,7 +99,7 @@ class CurseForgeProject:
         return unpack_directory
 
     def download_file(self, file_id, destination=None):
-        self.logger.debug("Downloading project %s, file %s", str(self.project_id), str(file_id))
+        self.logger.info("Fetching project %s, file %s", str(self.project_id), str(file_id))
         return self._client.downloader.download(self.file_url(file_id), destination)
 
     def file_url(self, file_id):
@@ -238,12 +239,18 @@ class MccdlCommandLineApplication:
     def __init__(self):
         self.argparser = argparse.ArgumentParser()
         self.configure_argparser()
+        self.logger = logger(self)
 
     def configure_argparser(self):
         a = self.argparser
         a.add_argument(
             "-c", "--cache-directory", type=str, default=str(CurseForgeClient.DEFAULT_CACHE_DIR),
             help="Path to directory to cache mccdl files. Defaults to %(default)s."
+        )
+        a.add_argument(
+            "-l", "--log-level", type=str, default="info",
+            choices=("debug", "info", "warning", "error", "critical"),
+            help="Log level to use  for this run. Defaults to %(default)s."
         )
         a.add_argument(
             "--multimc-directory", type=str, default=appdirs.user_data_dir("multimc5"),
@@ -262,6 +269,11 @@ class MccdlCommandLineApplication:
             help="Name of the MultiMC instance to create."
         )
 
+    def configure_logging(self, log_level):
+        logging.basicConfig()
+        logger = logging.getLogger("mccdl")
+        logger.setLevel(getattr(logging, log_level.upper()))
+
     def make_curseforge_client(self, args):
         cache_dir = Path(args.cache_directory)
         downloader = CachingDownloader(cache_dir / "download")
@@ -272,9 +284,11 @@ class MccdlCommandLineApplication:
 
     def run(self, argv):
         args = self.argparser.parse_args(argv)
+        self.configure_logging(args.log_level)
         curseforge_client = self.make_curseforge_client(args)
 
         curseforge_client.install_modpack(args.modpack_name, args.instance_name, args.modpack_file_id)
+        self.logger.info("Done installing modpack %s as instance %s", args.modpack_name, args.instance_name)
 
 
 class MultiMcInstanceManager:
