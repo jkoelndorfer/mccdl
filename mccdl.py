@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with mccdl.  If not, see <http://www.gnu.org/licenses/>.
 
+import argparse
 from collections import namedtuple
 from distutils.dir_util import copy_tree
 import errno
@@ -28,6 +29,7 @@ import os
 from pathlib import Path
 from urllib.parse import unquote as urlunquote, urljoin as _urljoin
 import shutil
+import sys
 import textwrap
 import zipfile
 
@@ -54,21 +56,23 @@ def urljoin(base, *parts):
 
 class CurseForgeClient:
     CURSE_BASE_URL = "http://minecraft.curseforge.com"
+    DEFAULT_CACHE_DIR = Path(appdirs.user_cache_dir("mccdl"))
 
-    def __init__(self):
-        self.cache_dir = Path(appdirs.user_cache_dir("mccdl"))
-        self.downloader = CachingDownloader(self.cache_dir / "download")
+    def __init__(self, instance_manager, downloader, unpacker):
+        self.downloader = downloader
+        self.instance_manager = instance_manager
         self.logger = logger(self)
-        self.multimc = MultiMcInstanceManager(Path(appdirs.user_data_dir("multimc5")), self.downloader)
-        self.unpacker = CurseForgeDownloadUnpacker(self.cache_dir / "unpack")
+        self.unpacker = unpacker
 
     def install_modpack(self, project_id, instance_name, file_id="latest"):
         self.logger.info("Installing modpack %s to instance %s, file ID %s",
                          str(project_id), instance_name, str(file_id))
         modpack_extract_dir = self.project(project_id).download_and_unpack_file(file_id)
         modpack = CurseForgeModPack(modpack_extract_dir)
-        instance = self.multimc.instance(instance_name)
+
+        instance = self.instance_manager.instance(instance_name)
         instance.create(modpack.minecraft_version, modpack.forge_version)
+
         for modpack_file in modpack.files():
             self.project(modpack_file.project_id).download_file(
                 modpack_file.file_id, instance.mods_directory
@@ -230,6 +234,49 @@ class CachingDownloader:
         return dir_path / self._download_filename(url)
 
 
+class MccdlCommandLineApplication:
+    def __init__(self):
+        self.argparser = argparse.ArgumentParser()
+        self.configure_argparser()
+
+    def configure_argparser(self):
+        a = self.argparser
+        a.add_argument(
+            "-c", "--cache-directory", type=str, default=str(CurseForgeClient.DEFAULT_CACHE_DIR),
+            help="Path to directory to cache mccdl files. Defaults to %(default)s."
+        )
+        a.add_argument(
+            "--multimc-directory", type=str, default=appdirs.user_data_dir("multimc5"),
+            help="Path to the MultiMC directory. Defaults to %(default)s."
+        )
+        a.add_argument(
+            "--modpack-file-id", type=str, default="latest",
+            help="File ID of the modpack to download. Defaults to %(default)s."
+        )
+        a.add_argument(
+            "modpack_name", type=str,
+            help="ID or name of the modpack to download."
+        )
+        a.add_argument(
+            "instance_name", type=str,
+            help="Name of the MultiMC instance to create."
+        )
+
+    def make_curseforge_client(self, args):
+        cache_dir = Path(args.cache_directory)
+        downloader = CachingDownloader(cache_dir / "download")
+        unpacker = CurseForgeDownloadUnpacker(cache_dir / "unpack")
+        instance_manager = MultiMcInstanceManager(args.multimc_directory, downloader)
+
+        return CurseForgeClient(instance_manager, downloader, unpacker)
+
+    def run(self, argv):
+        args = self.argparser.parse_args(argv)
+        curseforge_client = self.make_curseforge_client(args)
+
+        curseforge_client.install_modpack(args.modpack_name, args.instance_name, args.modpack_file_id)
+
+
 class MultiMcInstanceManager:
     def __init__(self, multimc_directory, downloader):
         self.multimc_directory = Path(multimc_directory)
@@ -296,3 +343,7 @@ class MultiMcInstance:
     @property
     def mods_directory(self):
         return self.minecraft_directory / "mods"
+
+
+if __name__ == "__main__":
+    MccdlCommandLineApplication().run(sys.argv[1:])
