@@ -23,6 +23,7 @@ import errno
 from functools import reduce
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from urllib.parse import unquote as urlunquote, urljoin as _urljoin
@@ -35,6 +36,13 @@ import requests
 
 
 CurseForgeModPackFile = namedtuple("CurseForgeModPackFile", ("project_id", "file_id", "required"))
+
+
+def logger(obj):
+    """
+    Returns a logger suitable for use by the passed in object.
+    """
+    return logging.getLogger(".".join(["mccdl", obj.__class__.__name__]))
 
 
 def urljoin(base, *parts):
@@ -50,10 +58,13 @@ class CurseForgeClient:
     def __init__(self):
         self.cache_dir = Path(appdirs.user_cache_dir("mccdl"))
         self.downloader = CachingDownloader(self.cache_dir / "download")
+        self.logger = logger(self)
         self.multimc = MultiMcInstanceManager(Path(appdirs.user_data_dir("multimc5")), self.downloader)
         self.unpacker = CurseForgeDownloadUnpacker(self.cache_dir / "unpack")
 
     def install_modpack(self, project_id, instance_name, file_id="latest"):
+        self.logger.info("Installing modpack %s to instance %s, file ID %s",
+                         str(project_id), instance_name, str(file_id))
         modpack_extract_dir = self.project(project_id).download_and_unpack_file(file_id)
         modpack = CurseForgeModPack(modpack_extract_dir)
         instance = self.multimc.instance(instance_name)
@@ -74,20 +85,25 @@ class CurseForgeClient:
 class CurseForgeProject:
     def __init__(self, client, project_id):
         self._client = client
+        self.logger = logger(self)
         self.project_id = project_id
 
     def download_and_unpack_file(self, file_id):
         archive_path = self.download_file(file_id)
-        return self._client.unpacker.unpack(archive_path)
+        unpack_directory = self._client.unpacker.unpack(archive_path)
+        return unpack_directory
 
     def download_file(self, file_id, destination=None):
+        self.logger.debug("Downloading project %s, file %s", str(self.project_id), str(file_id))
         return self._client.downloader.download(self.file_url(file_id), destination)
 
     def file_url(self, file_id):
         url_parts = ["files", file_id]
         if file_id != "latest":
             url_parts.append("download")
-        return self.url_for(*url_parts)
+        url = self.url_for(*url_parts)
+        self.logger.debug("URL for project %s, file %s is %s", self.project_id, file_id, url)
+        return url
 
     def url_for(self, *path):
         return self._client.url_for("projects", self.project_id, *path)
@@ -95,9 +111,11 @@ class CurseForgeProject:
 
 class CurseForgeDownloadUnpacker:
     def __init__(self, unpack_dir):
+        self.logger = logger(self)
         self.unpack_dir = Path(unpack_dir)
 
     def unpack(self, archive_path):
+        self.logger.debug("Unpacking archive %s", archive_path)
         unpack_destination = self._unpack_destination(archive_path)
         try:
             shutil.rmtree(unpack_destination)
@@ -106,6 +124,7 @@ class CurseForgeDownloadUnpacker:
                 raise e
         zipf = zipfile.ZipFile(str(archive_path))
         zipf.extractall(unpack_destination)
+        self.logger.debug("Unpacked archive to %s", unpack_destination)
 
         return unpack_destination
 
@@ -149,18 +168,23 @@ class CurseForgeModPack:
 class CachingDownloader:
     def __init__(self, cache_dir):
         self.cache_dir = Path(cache_dir)
+        self.logger = logger(self)
 
     def download(self, url, destination=None):
         url_cache_path = self._path_for_url(url)
+        self.logger.debug("Cache directory for %s is %s", url, url_cache_path)
         cached_file_path = None
         if os.path.exists(url_cache_path):
+            self.logger.debug("Cache directory for %s already exists", url)
             cached_dir_content = os.listdir(url_cache_path)
             cached_file_path = (url_cache_path / cached_dir_content[0]) if cached_dir_content else None
 
         if cached_file_path is None:
+            self.logger.debug("No cached download for %s, downloading", url)
             cached_file_path = self._download(url)
 
         if destination is not None:
+            self.logger.debug("Copying cached file %s to %s", cached_file_path, destination)
             destination = Path(destination)
             self._mkdir_p(destination.parent)
             shutil.copy(cached_file_path, destination)
@@ -229,10 +253,13 @@ class MultiMcInstance:
 
     def __init__(self, directory, name, instance_manager):
         self.directory = Path(directory)
+        self.logger = logger(self)
         self.name = name
         self.instance_manager = instance_manager
 
     def create(self, minecraft_version, forge_version):
+        self.logger.info("Creating MultiMC instance %s, Minecraft version %s, Forge version %s",
+                         self.name, minecraft_version, forge_version)
         os.makedirs(self.minecraft_directory)
         os.makedirs(self.mods_directory)
         self._configure_instance_base(minecraft_version)
@@ -245,10 +272,13 @@ class MultiMcInstance:
             iconKey=default
             name={instance_name}
         """).format(minecraft_version=minecraft_version, instance_name=self.name).lstrip()
-        with open(self.directory / "instance.cfg", "w") as f:
+        instance_cfg_path = self.directory / "instance.cfg"
+        self.logger.debug("Wrote instance configuration to %s", instance_cfg_path)
+        with open(instance_cfg_path, "w") as f:
             f.write(instance_cfg)
 
     def _configure_instance_forge(self, minecraft_version, forge_version):
+        self.logger.debug("Configuring MultiMC instance Forge")
         patches_dir = self.directory / "patches"
         self.instance_manager.downloader.download(
             self._forge_config_url(minecraft_version, forge_version),
