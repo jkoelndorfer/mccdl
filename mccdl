@@ -1,0 +1,23 @@
+#!/bin/bash
+
+venv_dir='.venv'
+
+if [[ -z "$(which virtualenv)" ]]; then
+    echo "I can't find python virtualenv in PATH." >&2
+    echo "Please install python virtualenv or check your PATH." >&2
+    exit 1
+fi
+
+cd "$(dirname "$0")"
+do_venv_setup=0
+if [[ ! -d "$venv_dir" ]]; then
+    virtualenv -p python3 "$venv_dir"
+    do_venv_setup=1
+fi
+source .venv/bin/activate
+if [[ "$do_venv_setup" == 1 ]]; then
+    pip install --upgrade pip
+    pip install -r requirements.txt
+fi
+
+./mccdl.py "$@"
