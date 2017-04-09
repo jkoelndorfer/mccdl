@@ -44,7 +44,7 @@ def urljoin(base, *parts):
     return reduce(lambda base, part: _urljoin(base + "/", str(part).lstrip("/")), parts, base)
 
 
-class CurseForgeClient(object):
+class CurseForgeClient:
     CURSE_BASE_URL = "http://minecraft.curseforge.com"
 
     def __init__(self):
@@ -71,7 +71,7 @@ class CurseForgeClient(object):
         return urljoin(self.CURSE_BASE_URL, *path)
 
 
-class CurseForgeProject(object):
+class CurseForgeProject:
     def __init__(self, client, project_id):
         self._client = client
         self.project_id = project_id
@@ -93,7 +93,7 @@ class CurseForgeProject(object):
         return self._client.url_for("projects", self.project_id, *path)
 
 
-class CurseForgeDownloadUnpacker(object):
+class CurseForgeDownloadUnpacker:
     def __init__(self, unpack_dir):
         self.unpack_dir = Path(unpack_dir)
 
@@ -113,7 +113,7 @@ class CurseForgeDownloadUnpacker(object):
         return self.unpack_dir / os.path.basename(archive_path)
 
 
-class CurseForgeModPack(object):
+class CurseForgeModPack:
     def __init__(self, unpack_directory):
         self.unpack_directory = Path(unpack_directory)
         with open(self.unpack_directory / "manifest.json", "r") as f:
@@ -146,7 +146,7 @@ class CurseForgeModPack(object):
         return self.manifest["minecraft"]["version"]
 
 
-class CachingDownloader(object):
+class CachingDownloader:
     def __init__(self, cache_dir):
         self.cache_dir = Path(cache_dir)
 
@@ -206,7 +206,7 @@ class CachingDownloader(object):
         return dir_path / self._download_filename(url)
 
 
-class MultiMcInstanceManager(object):
+class MultiMcInstanceManager:
     def __init__(self, multimc_directory, downloader):
         self.multimc_directory = Path(multimc_directory)
         self.downloader = downloader
@@ -224,7 +224,7 @@ class MultiMcInstanceManager(object):
         return self.multimc_directory / "instances" / instance_name
 
 
-class MultiMcInstance(object):
+class MultiMcInstance:
     MULTIMC_FORGE_CONFIGURATION_SITE = "https://meta.multimc.org/net.minecraftforge"
 
     def __init__(self, directory, name, instance_manager):
