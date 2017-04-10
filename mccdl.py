@@ -23,6 +23,7 @@ from distutils.dir_util import copy_tree
 import errno
 from functools import reduce
 import hashlib
+from http import HTTPStatus
 import json
 import logging
 import os
@@ -35,10 +36,12 @@ import textwrap
 import zipfile
 
 import appdirs
+from bs4 import BeautifulSoup
 import requests
 
 
 CurseForgeModPackFile = namedtuple("CurseForgeModPackFile", ("project_id", "file_id", "required"))
+CurseForgeFileListing = namedtuple("CurseForgeFileListing", ("project_id", "file_id", "game_version"))
 
 
 def logger(obj):
@@ -95,7 +98,7 @@ class CurseForgeClient:
 
         for modpack_file in modpack.files():
             self.project(modpack_file.project_id).download_file(
-                modpack_file.file_id, instance.mods_directory
+                modpack_file.file_id, instance.mods_directory, game_version=modpack.minecraft_version
             )
         self.logger.info("Installing modpack overrides")
         modpack.install_overrides(instance.minecraft_directory)
@@ -120,9 +123,48 @@ class CurseForgeProject:
         unpack_directory = self._client.unpacker.unpack(archive_path)
         return unpack_directory
 
-    def download_file(self, file_id, destination=None):
+    def download_file(self, file_id, destination=None, game_version=None):
         self.logger.info("Fetching project %s, file %s", str(self.project_id), str(file_id))
-        return self._client.downloader.download(self.file_url(file_id), destination)
+        try:
+            file_path = self._client.downloader.download(self.file_url(file_id), destination)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == HTTPStatus.NOT_FOUND:
+                # A file disappeared on Curse, or maybe the modpack author screwed up.
+                # Let's try to get the next available file.
+                next_file = self._next_file_after(file_id, game_version)
+                self.logger.warn("Could not find file %s for project %s, getting file %d instead",
+                                 file_id, self.project_id, next_file.file_id)
+                file_path = self._client.downloader.download(self.file_url(next_file.file_id), destination)
+            else:
+                raise e
+        return file_path
+
+    def _files(self, game_version=None):
+        response = requests.get(self.url_for("files"))
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # All file links share the same class overflow-tip.
+        #
+        # These hrefs are something like /projects/$project_name/files/$file_id
+        file_elements = soup.find_all("tr", attrs={"class": "project-file-list-item"})
+        files = list()
+        for fe in file_elements:
+            file_link = fe.findChild("a", attrs={"class": "overflow-tip"}).get("href")
+            file_id = int(file_link.split("/")[-1])
+            file_game_version = fe.findChild("span", attrs={"class": "version-label"}).text.strip()
+            files.append(CurseForgeFileListing(self.project_id, file_id, file_game_version))
+
+        if game_version is not None:
+            files_matching_version = [f for f in files if f.game_version == game_version]
+        else:
+            files_matching_version = files
+
+        self.logger.debug(
+            "Project %s has files: %s", self.project_id,
+            ", ".join((str(i.file_id) for i in files_matching_version))
+        )
+        return files_matching_version
 
     def file_url(self, file_id):
         url_parts = ["files", file_id]
@@ -131,6 +173,11 @@ class CurseForgeProject:
         url = self.url_for(*url_parts)
         self.logger.debug("URL for project %s, file %s is %s", self.project_id, file_id, url)
         return url
+
+    def _next_file_after(self, file_id, game_version=None):
+        file_id = int(file_id)
+        file_id_list = self._files(game_version)
+        return next(filter(lambda i: i.file_id > file_id, sorted(file_id_list)))
 
     def url_for(self, *path):
         return self._client.url_for("projects", self.project_id, *path)
