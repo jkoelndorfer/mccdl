@@ -28,6 +28,7 @@ import logging
 import os
 from pathlib import Path
 from urllib.parse import unquote as urlunquote, urljoin as _urljoin
+import re
 import shutil
 import sys
 import textwrap
@@ -64,14 +65,32 @@ class CurseForgeClient:
         self.logger = logger(self)
         self.unpacker = unpacker
 
-    def install_modpack(self, project_id, instance_name, file_id="latest"):
-        self.logger.info("Installing modpack %s to instance %s, file ID %s",
-                         str(project_id), instance_name, str(file_id))
+    def install_modpack(self, project_id, instance_name, file_id=None):
+        self._setup_modpack("install", project_id, instance_name, file_id)
+
+    def upgrade_modpack(self, project_id, instance_name, file_id=None):
+        self._setup_modpack("upgrade", project_id, instance_name, file_id)
+
+    def project(self, project_id):
+        return CurseForgeProject(self, project_id)
+
+    def url_for(self, *path):
+        return urljoin(self.CURSE_BASE_URL, *path)
+
+    def _setup_modpack(self, mode, project_id, instance_name, file_id=None):
+        assert mode in ("install", "upgrade")
+        action = {"install": "Installing", "upgrade": "Upgrading"}.get(mode)
+        self.logger.info("%s modpack %s to instance %s, file ID %s",
+                         action, str(project_id), instance_name, str(file_id))
+
+        file_id = file_id or "latest"
         modpack_extract_dir = self.project(project_id).download_and_unpack_file(file_id)
         modpack = CurseForgeModPack(modpack_extract_dir)
 
         instance = self.instance_manager.instance(instance_name)
-        instance.create(modpack.minecraft_version, modpack.forge_version)
+        setup_method = {"install": instance.create, "upgrade": instance.upgrade}.get(mode)
+
+        setup_method(modpack.minecraft_version, modpack.forge_version)
 
         for modpack_file in modpack.files():
             self.project(modpack_file.project_id).download_file(
@@ -79,12 +98,6 @@ class CurseForgeClient:
             )
         self.logger.info("Installing modpack overrides")
         modpack.install_overrides(instance.minecraft_directory)
-
-    def project(self, project_id):
-        return CurseForgeProject(self, project_id)
-
-    def url_for(self, *path):
-        return urljoin(self.CURSE_BASE_URL, *path)
 
 
 class CurseForgeProject:
@@ -253,6 +266,10 @@ class MccdlCommandLineApplication:
             help="Log level to use  for this run. Defaults to %(default)s."
         )
         a.add_argument(
+            "--upgrade", action="store_true", default=False,
+            help="If specified, allow upgrading an existing modpack instance."
+        )
+        a.add_argument(
             "--multimc-directory", type=str, default=appdirs.user_data_dir("multimc5"),
             help="Path to the MultiMC directory. Defaults to %(default)s."
         )
@@ -285,9 +302,10 @@ class MccdlCommandLineApplication:
     def run(self, argv):
         args = self.argparser.parse_args(argv)
         self.configure_logging(args.log_level)
-        curseforge_client = self.make_curseforge_client(args)
+        c = self.make_curseforge_client(args)
 
-        curseforge_client.install_modpack(args.modpack_name, args.instance_name, args.modpack_file_id)
+        action_method = c.upgrade_modpack if args.upgrade else c.install_modpack
+        action_method(args.modpack_name, args.instance_name, args.modpack_file_id)
         self.logger.info("Done installing modpack %s as instance %s", args.modpack_name, args.instance_name)
 
 
@@ -318,25 +336,43 @@ class MultiMcInstance:
         self.name = name
         self.instance_manager = instance_manager
 
-    def create(self, minecraft_version, forge_version):
-        self.logger.info("Creating MultiMC instance %s, Minecraft version %s, Forge version %s",
-                         self.name, minecraft_version, forge_version)
-        os.makedirs(self.minecraft_directory)
-        os.makedirs(self.mods_directory)
+    def configure(self, minecraft_version, forge_version):
         self._configure_instance_base(minecraft_version)
         self._configure_instance_forge(minecraft_version, forge_version)
 
+    def create(self, minecraft_version, forge_version):
+        self.logger.info("Creating MultiMC instance %s, Minecraft version %s, Forge version %s",
+                         self.name, minecraft_version, forge_version)
+        if os.path.exists(self.directory):
+            errmsg = "MultiMC instance {} already exists".format(self.name)
+            raise MultiMcInstanceExistsError(errmsg)
+        os.makedirs(self.mods_directory)
+
+        self.configure(minecraft_version, forge_version)
+
+    def upgrade(self, minecraft_version, forge_version):
+        try:
+            shutil.rmtree(self.mods_directory)
+        except FileNotFoundError:
+            pass
+        os.makedirs(self.mods_directory)
+
+        self.configure(minecraft_version, forge_version)
+
+    def _apply_minecraft_version(self, minecraft_version):
+        with open(self.instance_cfg, "r+") as f:
+            f.seek(0, os.SEEK_SET)
+            instance_cfg_content = f.read()
+            f.seek(0, os.SEEK_SET)
+            new_instance_cfg = re.sub("(IntendedVersion=)[^\s]*",
+                                      r"\g<1>" + minecraft_version, instance_cfg_content)
+            f.write(new_instance_cfg)
+            f.truncate()
+
     def _configure_instance_base(self, minecraft_version):
-        instance_cfg = textwrap.dedent("""
-            InstanceType=OneSix
-            IntendedVersion={minecraft_version}
-            iconKey=default
-            name={instance_name}
-        """).format(minecraft_version=minecraft_version, instance_name=self.name).lstrip()
-        instance_cfg_path = self.directory / "instance.cfg"
-        self.logger.debug("Wrote instance configuration to %s", instance_cfg_path)
-        with open(instance_cfg_path, "w") as f:
-            f.write(instance_cfg)
+        if not os.path.exists(self.instance_cfg):
+            self._set_default_instance_cfg()
+        self._apply_minecraft_version(minecraft_version)
 
     def _configure_instance_forge(self, minecraft_version, forge_version):
         self.logger.debug("Configuring MultiMC instance Forge")
@@ -350,6 +386,17 @@ class MultiMcInstance:
         forge_config_filename = "{}-{}.json".format(minecraft_version, forge_version)
         return urljoin(self.MULTIMC_FORGE_CONFIGURATION_SITE, forge_config_filename)
 
+    def _set_default_instance_cfg(self):
+        instance_cfg_content = textwrap.dedent("""
+            InstanceType=OneSix
+            IntendedVersion=
+            iconKey=default
+            name={instance_name}
+        """).format(instance_name=self.name).strip()
+        self.logger.debug("Wrote instance configuration to %s", self.instance_cfg)
+        with open(self.instance_cfg, "w") as f:
+            f.write(instance_cfg_content)
+
     @property
     def minecraft_directory(self):
         return self.directory / "minecraft"
@@ -357,6 +404,22 @@ class MultiMcInstance:
     @property
     def mods_directory(self):
         return self.minecraft_directory / "mods"
+
+    @property
+    def instance_cfg(self):
+        return self.directory / "instance.cfg"
+
+
+class MccdlError(Exception):
+    """
+    Base class for exceptions raised by mccdl.
+    """
+
+
+class MultiMcInstanceExistsError(MccdlError):
+    """
+    Exception raised when a user tries to create a MultiMC instance that already exists.
+    """
 
 
 if __name__ == "__main__":
