@@ -56,7 +56,8 @@ def urljoin(base, *parts):
 
 
 class CurseForgeClient:
-    CURSE_BASE_URL = "http://minecraft.curseforge.com"
+    CURSE_HOSTNAME = "minecraft.curseforge.com"
+    CURSE_BASE_URL = "http://" + CURSE_HOSTNAME
     DEFAULT_CACHE_DIR = Path(appdirs.user_cache_dir("mccdl"))
 
     def __init__(self, instance_manager, downloader, unpacker):
@@ -65,11 +66,11 @@ class CurseForgeClient:
         self.logger = logger(self)
         self.unpacker = unpacker
 
-    def install_modpack(self, project_id, instance_name, file_id=None):
-        self._setup_modpack("install", project_id, instance_name, file_id)
+    def install_modpack(self, project_id, file_id, instance_name):
+        self._setup_modpack("install", project_id, file_id, instance_name)
 
-    def upgrade_modpack(self, project_id, instance_name, file_id=None):
-        self._setup_modpack("upgrade", project_id, instance_name, file_id)
+    def upgrade_modpack(self, project_id, file_id, instance_name):
+        self._setup_modpack("upgrade", project_id, file_id, instance_name)
 
     def project(self, project_id):
         return CurseForgeProject(self, project_id)
@@ -77,13 +78,13 @@ class CurseForgeClient:
     def url_for(self, *path):
         return urljoin(self.CURSE_BASE_URL, *path)
 
-    def _setup_modpack(self, mode, project_id, instance_name, file_id=None):
+    def _setup_modpack(self, mode, project_id, file_id, instance_name):
         assert mode in ("install", "upgrade")
         action = {"install": "Installing", "upgrade": "Upgrading"}.get(mode)
-        self.logger.info("%s modpack %s to instance %s, file ID %s",
+
+        self.logger.info("%s modpack %s in instance %s, file ID %s",
                          action, str(project_id), instance_name, str(file_id))
 
-        file_id = file_id or "latest"
         modpack_extract_dir = self.project(project_id).download_and_unpack_file(file_id)
         modpack = CurseForgeModPack(modpack_extract_dir)
 
@@ -98,6 +99,14 @@ class CurseForgeClient:
             )
         self.logger.info("Installing modpack overrides")
         modpack.install_overrides(instance.minecraft_directory)
+
+    def url_to_project_and_file(self, url):
+        match = re.search(re.escape(self.CURSE_HOSTNAME) + "/projects/([^/]*)(/files/([0-9]+)/)?", url)
+        if match is None:
+            raise InvalidCurseModpackUrlError("{} is not a valid Minecraft CurseForge URL".format(url))
+        project_id = match.group(1)
+        file_id = match.group(3) or "latest"
+        return (project_id, file_id)
 
 
 class CurseForgeProject:
@@ -274,12 +283,8 @@ class MccdlCommandLineApplication:
             help="Path to the MultiMC directory. Defaults to %(default)s."
         )
         a.add_argument(
-            "--modpack-file-id", type=str, default="latest",
-            help="File ID of the modpack to download. Defaults to %(default)s."
-        )
-        a.add_argument(
-            "modpack_name", type=str,
-            help="ID or name of the modpack to download."
+            "modpack_url", type=str,
+            help="Link to the modpack on Minecraft CurseForge."
         )
         a.add_argument(
             "instance_name", type=str,
@@ -305,8 +310,9 @@ class MccdlCommandLineApplication:
         c = self.make_curseforge_client(args)
 
         action_method = c.upgrade_modpack if args.upgrade else c.install_modpack
-        action_method(args.modpack_name, args.instance_name, args.modpack_file_id)
-        self.logger.info("Done installing modpack %s as instance %s", args.modpack_name, args.instance_name)
+        project_id, file_id = c.url_to_project_and_file(args.modpack_url)
+        action_method(project_id, file_id, args.instance_name)
+        self.logger.info("Done installing modpack %s as instance %s", args.modpack_url, args.instance_name)
 
 
 class MultiMcInstanceManager:
@@ -413,6 +419,13 @@ class MultiMcInstance:
 class MccdlError(Exception):
     """
     Base class for exceptions raised by mccdl.
+    """
+
+
+class InvalidCurseModpackUrlError(MccdlError):
+    """
+    Exception that is raised when the user provides an invalid Minecraft CurseForge
+    project URL.
     """
 
 
