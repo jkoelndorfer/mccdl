@@ -88,13 +88,17 @@ class CurseForgeClient:
         self.logger.info("%s modpack %s in instance %s, file ID %s",
                          action, str(project_id), instance_name, str(file_id))
 
-        modpack_extract_dir = self.project(project_id).download_and_unpack_file(file_id)
+        project = self.project(project_id)
+        modpack_extract_dir = project.download_and_unpack_file(file_id)
         modpack = CurseForgeModPack(modpack_extract_dir)
 
         instance = self.instance_manager.instance(instance_name)
         setup_method = {"install": instance.create, "upgrade": instance.upgrade}.get(mode)
-
-        setup_method(modpack.minecraft_version, modpack.forge_version)
+        setup_args = [modpack.minecraft_version, modpack.forge_version]
+        if mode == "install":
+            project_icon = project.download_icon()
+            setup_args.append(project_icon)
+        setup_method(*setup_args)
 
         for modpack_file in modpack.files():
             self.project(modpack_file.project_id).download_file(
@@ -138,6 +142,14 @@ class CurseForgeProject:
             else:
                 raise e
         return file_path
+
+    def download_icon(self):
+        response = requests.get(self.url_for())
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        icon_url = soup.findChild("div", attrs={"class": "avatar-wrapper"}).findChild("img").get("src")
+
+        return self._client.downloader.download(icon_url)
 
     def _files(self, game_version=None):
         response = requests.get(self.url_for("files"))
@@ -389,11 +401,11 @@ class MultiMcInstance:
         self.name = name
         self.instance_manager = instance_manager
 
-    def configure(self, minecraft_version, forge_version):
-        self._configure_instance_base(minecraft_version)
+    def configure(self, minecraft_version, forge_version, icon_key=None):
+        self._configure_instance_base(minecraft_version, icon_key)
         self._configure_instance_forge(minecraft_version, forge_version)
 
-    def create(self, minecraft_version, forge_version):
+    def create(self, minecraft_version, forge_version, icon_path=None):
         self.logger.info("Creating MultiMC instance %s, Minecraft version %s, Forge version %s",
                          self.name, minecraft_version, forge_version)
         if os.path.exists(self.directory):
@@ -401,7 +413,12 @@ class MultiMcInstance:
             raise MultiMcInstanceExistsError(errmsg)
         os.makedirs(self.mods_directory)
 
-        self.configure(minecraft_version, forge_version)
+        multimc_icon_key = None
+        if icon_path is not None:
+            multimc_icon_filename = "mccdl_" + os.path.basename(icon_path)
+            multimc_icon_key = os.path.splitext(multimc_icon_filename)[0]
+            shutil.copyfile(icon_path, self.instance_manager.multimc_directory / "icons" / multimc_icon_filename)
+        self.configure(minecraft_version, forge_version, icon_key=multimc_icon_key)
 
     def upgrade(self, minecraft_version, forge_version):
         try:
@@ -412,20 +429,26 @@ class MultiMcInstance:
 
         self.configure(minecraft_version, forge_version)
 
-    def _apply_minecraft_version(self, minecraft_version):
+    def _apply_instance_options(self, options={}):
         with open(self.instance_cfg, "r+") as f:
             f.seek(0, os.SEEK_SET)
-            instance_cfg_content = f.read()
+            new_instance_cfg = f.read()
             f.seek(0, os.SEEK_SET)
-            new_instance_cfg = re.sub("(IntendedVersion=)[^\s]*",
-                                      r"\g<1>" + minecraft_version, instance_cfg_content)
+            for k, v in options.items():
+                new_instance_cfg = re.sub("({}=)[^\r\n]*".format(re.escape(k)),
+                                          r"\g<1>" + v, new_instance_cfg)
             f.write(new_instance_cfg)
             f.truncate()
 
-    def _configure_instance_base(self, minecraft_version):
+    def _configure_instance_base(self, minecraft_version, icon_key=None):
         if not os.path.exists(self.instance_cfg):
             self._set_default_instance_cfg()
-        self._apply_minecraft_version(minecraft_version)
+        instance_options = {
+            "IntendedVersion": minecraft_version
+        }
+        if icon_key is not None:
+            instance_options["iconKey"] = icon_key
+        self._apply_instance_options(instance_options)
 
     def _configure_instance_forge(self, minecraft_version, forge_version):
         self.logger.debug("Configuring MultiMC instance Forge")
