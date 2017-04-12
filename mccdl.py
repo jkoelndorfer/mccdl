@@ -108,11 +108,27 @@ class CurseForgeClient:
         modpack.install_overrides(instance.minecraft_directory)
 
     def url_to_project_and_file(self, url):
-        match = re.search(re.escape(self.CURSE_HOSTNAME) + "/projects/([^/]*)(/files/([0-9]+)/)?", url)
-        if match is None:
+        # Each entry in this list contains a regular expression matching a Curse
+        # project URL and two integers. The integers are group numbers for the previous
+        # regular expression. The first integer is required and is the capture group of
+        # project ID of the modpack. The second integer may be None and is the
+        # capture group of the file ID of the modpack.
+        url_regexes = [
+            ["/projects/([^/]*)(/files/([0-9]+)/)?", 1, 3],
+            ["/modpacks/minecraft/([0-9]+)-", 1, None]
+        ]
+        project_id = None
+        file_id = None
+        for regex, project_group_nr, file_group_nr in url_regexes:
+            match = re.search(regex, url)
+            if match is None:
+                continue
+            project_id = match.group(project_group_nr)
+            if file_group_nr is not None:
+                file_id = match.group(file_group_nr)
+        if project_id is None:
             raise InvalidCurseModpackUrlError("{} is not a valid Minecraft CurseForge URL".format(url))
-        project_id = match.group(1)
-        file_id = match.group(3) or "latest"
+        file_id = file_id or "latest"
         return (project_id, file_id)
 
 
