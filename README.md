@@ -30,7 +30,7 @@ could do it better and with more features.
 ## How do I use this thing?
 
 You need just a few things to make use of this script:
-    * python 3.4+
+    * python 3.6+ (this will be lowered to 3.4+ shortly)
     * virtualenv for python
     * MultiMC 0.5.0 (that's where the instances end up)
     * git (to clone the repository)
