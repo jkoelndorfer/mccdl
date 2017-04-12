@@ -27,7 +27,6 @@ from http import HTTPStatus
 import json
 import logging
 import os
-from pathlib import Path
 from urllib.parse import unquote as urlunquote, urljoin as _urljoin
 import re
 import shutil
@@ -61,7 +60,7 @@ def urljoin(base, *parts):
 class CurseForgeClient:
     CURSE_HOSTNAME = "minecraft.curseforge.com"
     CURSE_BASE_URL = "http://" + CURSE_HOSTNAME
-    DEFAULT_CACHE_DIR = Path(appdirs.user_cache_dir("mccdl"))
+    DEFAULT_CACHE_DIR = appdirs.user_cache_dir("mccdl")
 
     def __init__(self, instance_manager, downloader, unpacker):
         self.downloader = downloader
@@ -214,7 +213,7 @@ class CurseForgeProject:
 class CurseForgeDownloadUnpacker:
     def __init__(self, unpack_dir):
         self.logger = logger(self)
-        self.unpack_dir = Path(unpack_dir)
+        self.unpack_dir = unpack_dir
 
     def unpack(self, archive_path):
         self.logger.debug("Unpacking archive %s", archive_path)
@@ -231,13 +230,13 @@ class CurseForgeDownloadUnpacker:
         return unpack_destination
 
     def _unpack_destination(self, archive_path):
-        return self.unpack_dir / os.path.basename(archive_path)
+        return os.path.join(self.unpack_dir, os.path.basename(archive_path))
 
 
 class CurseForgeModPack:
     def __init__(self, unpack_directory):
-        self.unpack_directory = Path(unpack_directory)
-        with open(self.unpack_directory / "manifest.json", "r") as f:
+        self.unpack_directory = unpack_directory
+        with open(os.path.join(self.unpack_directory, "manifest.json"), "r") as f:
             self.manifest = json.loads(f.read())
 
     def files(self):
@@ -252,7 +251,7 @@ class CurseForgeModPack:
         #
         # In practice this should not be an issue since our script will execute once to install a
         # modpack, then exit.
-        copy_tree(str(self.unpack_directory / self.manifest["overrides"]), str(destination))
+        copy_tree(os.path.join(self.unpack_directory, self.manifest["overrides"]), destination)
 
     @property
     def forge_version(self):
@@ -269,7 +268,7 @@ class CurseForgeModPack:
 
 class CachingDownloader:
     def __init__(self, cache_dir):
-        self.cache_dir = Path(cache_dir)
+        self.cache_dir = cache_dir
         self.logger = logger(self)
 
     def download(self, url, destination=None):
@@ -279,7 +278,7 @@ class CachingDownloader:
         if os.path.exists(url_cache_path):
             self.logger.debug("Cache directory for %s already exists", url)
             cached_dir_content = os.listdir(url_cache_path)
-            cached_file_path = (url_cache_path / cached_dir_content[0]) if cached_dir_content else None
+            cached_file_path = (os.path.join(url_cache_path, cached_dir_content[0])) if cached_dir_content else None
 
         if cached_file_path is None:
             self.logger.debug("No cached download for %s, downloading", url)
@@ -287,8 +286,8 @@ class CachingDownloader:
 
         if destination is not None:
             self.logger.debug("Copying cached file %s to %s", cached_file_path, destination)
-            destination = Path(destination)
-            self._mkdir_p(destination.parent)
+            destination = destination
+            self._mkdir_p(os.path.dirname(destination))
             shutil.copy(cached_file_path, destination)
             download_destination = destination
         else:
@@ -303,7 +302,7 @@ class CachingDownloader:
         response.raise_for_status()
         download_destination = self._download_destination(url_cache_path, response.url)
 
-        self._mkdir_p(download_destination.parent)
+        self._mkdir_p(os.path.dirname(download_destination))
 
         with open(download_destination, "wb") as f:
             for buf in response.iter_content(1024):
@@ -322,14 +321,14 @@ class CachingDownloader:
         return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
     def _path_for_url(self, url):
-        return self.cache_dir / self._url_digest(url)
+        return os.path.join(self.cache_dir, self._url_digest(url))
 
     @classmethod
     def _download_filename(cls, response_url):
         return urlunquote(response_url.split("/")[-1])
 
     def _download_destination(self, dir_path, url):
-        return dir_path / self._download_filename(url)
+        return os.path.join(dir_path, self._download_filename(url))
 
 
 class MccdlCommandLineApplication:
@@ -372,9 +371,9 @@ class MccdlCommandLineApplication:
         logger.setLevel(getattr(logging, log_level.upper()))
 
     def make_curseforge_client(self, args):
-        cache_dir = Path(args.cache_directory)
-        downloader = CachingDownloader(cache_dir / "download")
-        unpacker = CurseForgeDownloadUnpacker(cache_dir / "unpack")
+        cache_dir = args.cache_directory
+        downloader = CachingDownloader(os.path.join(cache_dir, "download"))
+        unpacker = CurseForgeDownloadUnpacker(os.path.join(cache_dir, "unpack"))
         instance_manager = MultiMcInstanceManager(args.multimc_directory, downloader)
 
         return CurseForgeClient(instance_manager, downloader, unpacker)
@@ -392,7 +391,7 @@ class MccdlCommandLineApplication:
 
 class MultiMcInstanceManager:
     def __init__(self, multimc_directory, downloader):
-        self.multimc_directory = Path(multimc_directory)
+        self.multimc_directory = multimc_directory
         self.downloader = downloader
 
     def create(self, instance_name, minecraft_version, forge_version):
@@ -405,14 +404,14 @@ class MultiMcInstanceManager:
         return MultiMcInstance(self._instance_dir(name), name, self)
 
     def _instance_dir(self, instance_name):
-        return self.multimc_directory / "instances" / instance_name
+        return os.path.join(self.multimc_directory, "instances",  instance_name)
 
 
 class MultiMcInstance:
     MULTIMC_FORGE_CONFIGURATION_SITE = "https://meta.multimc.org/net.minecraftforge"
 
     def __init__(self, directory, name, instance_manager):
-        self.directory = Path(directory)
+        self.directory = directory
         self.logger = logger(self)
         self.name = name
         self.instance_manager = instance_manager
@@ -433,7 +432,9 @@ class MultiMcInstance:
         if icon_path is not None:
             multimc_icon_filename = "mccdl_" + os.path.basename(icon_path)
             multimc_icon_key = os.path.splitext(multimc_icon_filename)[0]
-            shutil.copyfile(icon_path, self.instance_manager.multimc_directory / "icons" / multimc_icon_filename)
+            shutil.copyfile(
+                icon_path, os.path.join(self.instance_manager.multimc_directory, "icons", multimc_icon_filename)
+            )
         self.configure(minecraft_version, forge_version, icon_key=multimc_icon_key)
 
     def upgrade(self, minecraft_version, forge_version):
@@ -468,10 +469,10 @@ class MultiMcInstance:
 
     def _configure_instance_forge(self, minecraft_version, forge_version):
         self.logger.debug("Configuring MultiMC instance Forge")
-        patches_dir = self.directory / "patches"
+        patches_dir = os.path.join(self.directory, "patches")
         self.instance_manager.downloader.download(
             self._forge_config_url(minecraft_version, forge_version),
-            patches_dir / "net.minecraftforge.json"
+            os.path.join(patches_dir, "net.minecraftforge.json")
         )
 
     def _forge_config_url(self, minecraft_version, forge_version):
@@ -491,15 +492,15 @@ class MultiMcInstance:
 
     @property
     def minecraft_directory(self):
-        return self.directory / "minecraft"
+        return os.path.join(self.directory, "minecraft")
 
     @property
     def mods_directory(self):
-        return self.minecraft_directory / "mods"
+        return os.path.join(self.minecraft_directory, "mods")
 
     @property
     def instance_cfg(self):
-        return self.directory / "instance.cfg"
+        return os.path.join(self.directory, "instance.cfg")
 
 
 class MccdlError(Exception):
