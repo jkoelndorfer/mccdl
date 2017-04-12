@@ -10,6 +10,9 @@ creates a MultiMC instance from them.
 * Given a modpack URL and instance name, mccdl creates a full MultiMC instance for you!
   This includes configuring MultiMC to download the correct version of Minecraft and
   Forge. You don't need to do anything afterwards except open MultiMC and click launch.
+* You can select which version of a pack you want by passing a link to the download for
+  a particular version. If no particular version is provided, the latest version of the
+  pack is downloaded.
 * If a manifest references a mod version that no longer exists on Curse, mccdl will find
   the next published file from the same mod (and Minecraft verseion) and download that,
   instead.
