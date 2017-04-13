@@ -23,7 +23,6 @@ from distutils.dir_util import copy_tree
 import errno
 from functools import reduce
 import hashlib
-from http import HTTPStatus
 import json
 import logging
 import os
@@ -147,7 +146,7 @@ class CurseForgeProject:
         try:
             file_path = self._client.downloader.download(self.file_url(file_id), destination)
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == HTTPStatus.NOT_FOUND:
+            if e.response.status_code == 404:
                 # A file disappeared on Curse, or maybe the modpack author screwed up.
                 # Let's try to get the next available file.
                 next_file = self._next_file_after(file_id, game_version)
