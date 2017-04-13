@@ -1,8 +1,15 @@
+# coverage
+.coverage
+
 # python virtualenv
 .venv
 
 # python bytecode
 *.pyc
+
+# tox
+.cache
+.tox
 
 # vim swap files
 .*.swp
