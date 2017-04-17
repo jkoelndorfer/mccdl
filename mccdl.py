@@ -26,7 +26,7 @@ import hashlib
 import json
 import logging
 import os
-from urllib.parse import unquote as urlunquote, urljoin as _urljoin
+from urllib.parse import parse_qs, unquote as urlunquote, urljoin as _urljoin, urlparse
 import re
 import shutil
 import sys
@@ -54,6 +54,61 @@ def urljoin(base, *parts):
     URL join function that makes more sense than Python's standard library version.
     """
     return reduce(lambda base, part: _urljoin(base + "/", str(part).lstrip("/")), parts, base)
+
+
+class CurseAddOnService:
+    TWITCH_LOGIN_URL = "https://www.twitch.tv/login"
+    TWITCH_COOKIE_URL = "https://www.twitch.tv/test_cookie"
+
+    def __init__(self):
+        self.session = requests.Session()
+
+    def login(self, username, password):
+        r = self.session.get(self.TWITCH_LOGIN_URL, allow_redirects=False)
+        passport_auth_url = r.headers["Location"]
+        self.session.get(passport_auth_url)  # This is necessary to avoid an error
+        self.session.get(self.TWITCH_COOKIE_URL)
+
+        params = self._passport_post_payload(passport_auth_url, username, password)
+        passport_result = self.session.post(passport_auth_url, data=params)
+        passport_result.raise_for_status()
+        callback_redirect = passport_result.json()["redirect"]
+        client_id, code, state, redirect_uri = self._curse_oauth_params(callback_redirect)
+
+        return self.session.post("logins-v1.curseapp.net/login/twitch-oauth", json={
+            "ClientID": client_id,
+            "Code": code,
+            "State": state,
+            "RedirectUri": redirect_uri
+        })
+
+    def _url_get_parms(self, url):
+        url_query_string = urlparse(url).query
+        # parse_qs sets each dict value to a list in case the query string has a
+        # value set multiple times. That doesn't happen for us, so we'll strip
+        # the list off here.
+        return {k: v[0] for k, v in parse_qs(url_query_string).items()}
+
+    def _curse_oauth_params(self, callback_redirect):
+        p = self._url_get_params(callback_redirect)
+
+        # Last element is redirect URI
+        return (p["client_id"], p["code"], p["state"], "http://localhost")
+
+    def _passport_post_payload(self, passport_auth_url, username, password):
+        p = self._url_get_parms(passport_auth_url)
+        return {
+            "client_id": p["client_id"],
+            "embed": "false",
+            "nonce": p["nonce"],
+            "redirect_uri": "http://localhost",
+            "response_type": p["response_type"],
+            "scope": p["scope"],
+            "state": p["state"],
+            "username": username,
+            "password": password,
+            "request_id": os.urandom(16).hex()
+        }
 
 
 class CurseForgeClient:
