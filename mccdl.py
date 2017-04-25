@@ -470,12 +470,12 @@ class MultiMcInstance:
         self.logger.debug("Configuring MultiMC instance Forge")
         patches_dir = os.path.join(self.directory, "patches")
         self.instance_manager.downloader.download(
-            self._forge_config_url(minecraft_version, forge_version),
+            self._forge_config_url(forge_version),
             os.path.join(patches_dir, "net.minecraftforge.json")
         )
 
-    def _forge_config_url(self, minecraft_version, forge_version):
-        forge_config_filename = "{}-{}.json".format(minecraft_version, forge_version)
+    def _forge_config_url(self, forge_version):
+        forge_config_filename = "{}.json".format(forge_version)
         return urljoin(self.MULTIMC_FORGE_CONFIGURATION_SITE, forge_config_filename)
 
     def _set_default_instance_cfg(self):
