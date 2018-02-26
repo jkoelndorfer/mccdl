@@ -407,7 +407,7 @@ class MultiMcInstanceManager:
 
 
 class MultiMcInstance:
-    MULTIMC_FORGE_CONFIGURATION_SITE = "https://meta.multimc.org/net.minecraftforge"
+    MULTIMC_FORGE_CONFIGURATION_SITE = "https://v1.meta.multimc.org/net.minecraftforge"
 
     def __init__(self, directory, name, instance_manager):
         self.directory = directory
