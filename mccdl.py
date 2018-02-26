@@ -352,7 +352,7 @@ class MccdlCommandLineApplication:
             help="If specified, allow upgrading an existing modpack instance."
         )
         a.add_argument(
-            "--multimc-directory", type=str, default=appdirs.user_data_dir("multimc5"),
+            "--multimc-directory", type=str, default=appdirs.user_data_dir("multimc"),
             help="Path to the MultiMC directory. Defaults to %(default)s."
         )
         a.add_argument(
