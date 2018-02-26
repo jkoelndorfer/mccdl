@@ -14,7 +14,7 @@ creates a MultiMC instance from them.
   a particular version. If no particular version is provided, the latest version of the
   pack is downloaded.
 * If a manifest references a mod version that no longer exists on Curse, mccdl will find
-  the next published file from the same mod (and Minecraft verseion) and download that,
+  the next published file from the same mod (and Minecraft version) and download that,
   instead.
 * For newly created instances, mccdl will pull the icon from the modpack.
 * mccdl can upgrade your modpack instances (**BACK UP your instance before doing this!**).
@@ -33,6 +33,7 @@ could do it better and with more features.
 ## How do I use this thing?
 
 You need just a few things to make use of this script:
+
     * python 3.6+ (this will be lowered to 3.4+ shortly)
     * virtualenv for python
     * MultiMC 0.5.0 (that's where the instances end up)
